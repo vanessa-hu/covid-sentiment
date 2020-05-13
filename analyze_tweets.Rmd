@@ -1,0 +1,53 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+```
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+sentiment	about_covid	covid_word	about_china	china_word
+
+```{r}
+columns = c("id" = "character","tweet" = "character", "date" = "character", "sentiment" = "numeric", "about_covid" = "factor", "covid_word" = "factor", "about_china" = "factor", "china_word" = "factor", "link" = "character")
+tweet_data = read.csv("tweets_all.txt",colClasses = columns, header = T, sep="\t",  encoding="UTF-8") %>% mutate(date = as.Date(date, format = "%Y-%m-%d"))
+head(tweet_data)
+
+```
+
+```{r}
+
+```
+
+
+sentiment ~ covid * asia + (1+asia||a_keyword) + (1+covid||covid_keyword)
+```{r}
+mod1 = tweet_data %>% mutate_all(~replace(., is.na(.), as.factor("none"))) %>% lmerTest::lmer(sentiment ~ date * about_covid * about_china + (1 + about_covid||covid_word) +  (1+about_china||china_word), data = .)
+summary(mod1)
+```
+
+
+
+library(lmerTest)
+library(lme4)
+mod1 = lme4::lmer(logDur ~ Phones + logTVFreq + IsMale + (1+Phones||Speaker), data = words)
+summary(mod1)
+
+mod2 = lme4::lmer(logDur ~ Phones + logTVFreq + (1+Phones||Speaker), data = words)
+anova(mod1, mod2, test="Chisq")
+summary(mod2)
+
+mod3 = lmerTest::lmer(logDur ~ Phones + logTVFreq + IsMale + (1+Phones||Speaker), data = words)
+summary(mod3)
+
+
+# mod1 had both intercept and slope
+mod4 = lme4::lmer(logDur ~ Phones + logTVFreq + IsMale + (1|Speaker), data = words)
+anova(mod4, mod1, test="Chisq")
+```
+
