@@ -1,53 +1,230 @@
 ---
-title: "R Notebook"
+title: "Sentiment Analysis of Coronavirus and China Tweets"
 output: html_notebook
 ---
 ```{r}
 library(tidyverse)
-library(lme4)
 library(lmerTest)
+library(reshape2)
 ```
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
-sentiment	about_covid	covid_word	about_china	china_word
+A Preliminary function to classify the tweet as 1 of 4 categories.
 
 ```{r}
-columns = c("id" = "character","tweet" = "character", "date" = "character", "sentiment" = "numeric", "about_covid" = "factor", "covid_word" = "factor", "about_china" = "factor", "china_word" = "factor", "link" = "character")
-tweet_data = read.csv("tweets_all.txt",colClasses = columns, header = T, sep="\t",  encoding="UTF-8") %>% mutate(date = as.Date(date, format = "%Y-%m-%d"))
-head(tweet_data)
+categorize = function(about_covid, about_china) {
+  if (as.numeric(about_covid) == 1 && as.numeric(about_china) == 1) {
+    return("about_covid&china")
+  } else if (as.numeric(about_covid) == 1 && as.numeric(about_china) == 0) {
+    return("about_covid")
+  } else if (as.numeric(about_covid) == 0 && as.numeric(about_china) == 1) {
+    return("about_china")
+  } else { return("regular")}
+}
 
 ```
 
+
+
+## Reading and Reshaping Initial Data
+
+
 ```{r}
+columns = c("id" = "character","tweet" = "character", "date" = "character", "sentiment" = "numeric", "about_covid" = "numeric", "covid_word" = "character", "about_china" = "numeric", "china_word" = "character", "link" = "character")
+tweet_data = read.csv("tweets_all.txt",colClasses = columns, header = T, sep="\t",  encoding="UTF-8")
+
+# original 13860 tweets
+tweet_data = tweet_data %>% mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+              mutate(china_word = as.factor(china_word), 
+                     covid_word = as.factor(covid_word)) %>%
+              mutate(sentiment = 100 *sentiment, category = mapply(categorize, about_covid, about_china)) %>%
+              mutate(about_covid = as.factor(about_covid), about_china = as.factor(about_china)) %>%
+              mutate(days_since = as.numeric(date - as.Date("2020-01-31", format="%Y-%m-%d")))
+tweet_data
+
+# reshaped data, 15247 observations merging words into one column, duplicating entries with both a covid and china word
+new_tweet_data = tweet_data %>%
+              melt(wide, id.vars = c("id","tweet", "date", "sentiment", "about_covid","covid_word","about_china",  "china_word","link"), measure.vars = c("covid_word","china_word"), variable.name = "word_type", value.name = "word") %>%
+              filter((about_covid == 0 & about_china == 0)|!is.na(word)) %>% subset(., !duplicated(subset(., select=c("id","tweet", "date", "sentiment", "about_covid","covid_word","about_china",  "china_word","link", "word"))))
+
+
+new_tweet_data$word <- replace(new_tweet_data$word, is.na(new_tweet_data$word), "none")
+
+new_tweet_data %>% select(-link, -tweet, -date, -sentiment, id, about_covid, about_china, covid_word, china_word, word_type, word) 
 
 ```
 
 
-sentiment ~ covid * asia + (1+asia||a_keyword) + (1+covid||covid_keyword)
+## Testing significance of individual predictors on sentiment.
+
 ```{r}
-mod1 = tweet_data %>% mutate_all(~replace(., is.na(.), as.factor("none"))) %>% lmerTest::lmer(sentiment ~ date * about_covid * about_china + (1 + about_covid||covid_word) +  (1+about_china||china_word), data = .)
+mod10 = new_tweet_data %>% lm(sentiment ~ about_china, data = .)
+summary(mod10)
+
+mod11 = new_tweet_data %>% lm(sentiment ~ about_covid, data = .)
+summary(mod11)
+
+mod12 = new_tweet_data %>% lm(sentiment ~ date, data = .)
+summary(mod12)
+
+```
+
+
+## Testing significance of the mixed effects model.
+
+```{r}
+mod0 = new_tweet_data %>% lm(sentiment ~ date * about_covid * about_china, data = .)
+mod1 = new_tweet_data %>% lmerTest::lmer(sentiment ~ date * about_covid * about_china + (1|word) , data = .)
 summary(mod1)
+anova(mod1, mod0, test = "Chisq")
+
+
+```
+
+
+### Extracted random effects for each keyword.
+```{r}
+ranef(mod1)
+```
+
+
+## Summary Statistics
+
+```{r}
+tweet_data %>% group_by(category) %>% summarize(mean(sentiment), sd(sentiment), median(sentiment), IQR(sentiment))
+tweet_data %>% group_by(about_covid) %>% summarize(mean(sentiment), sd(sentiment), median(sentiment), IQR(sentiment))
+tweet_data %>% group_by(about_china) %>% summarize(mean(sentiment), sd(sentiment), median(sentiment), IQR(sentiment))
+mean(tweet_data$sentiment)
+sd(tweet_data$sentiment)
+median(tweet_data$sentiment)
+mean(tweet_data$sentiment)
+```
+
+
+## Daily Mean Sentiments
+
+```{r}
+tweet_data %>% group_by(date, about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment))
+tweet_data %>% group_by(date,about_covid) %>% summarize(day_sentiment = mean(sentiment))
+tweet_data %>% group_by(date,about_china) %>% summarize(day_sentiment = mean(sentiment))
+tweet_data %>% group_by(date) %>% summarize(day_sentiment = mean(sentiment))
 ```
 
 
 
-library(lmerTest)
-library(lme4)
-mod1 = lme4::lmer(logDur ~ Phones + logTVFreq + IsMale + (1+Phones||Speaker), data = words)
-summary(mod1)
-
-mod2 = lme4::lmer(logDur ~ Phones + logTVFreq + (1+Phones||Speaker), data = words)
-anova(mod1, mod2, test="Chisq")
-summary(mod2)
-
-mod3 = lmerTest::lmer(logDur ~ Phones + logTVFreq + IsMale + (1+Phones||Speaker), data = words)
-summary(mod3)
+## Graphs
 
 
-# mod1 had both intercept and slope
-mod4 = lme4::lmer(logDur ~ Phones + logTVFreq + IsMale + (1|Speaker), data = words)
-anova(mod4, mod1, test="Chisq")
+### Tweet types
+
+```{r}
+four_cats = c("China (only)", "Covid (only)", "Covid & China", "Neither")
+cov_cats = c("Non-COVID", "COVID")
+ch_cats = c("Non-China", "China")
+cbPalette <- c("#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+tweet_data %>% mutate(category = as.character(category)) %>% 
+          ggplot(aes(x = category)) + geom_bar(stat='count', fill = "cadetblue2", alpha = 0.8) + 
+          theme_minimal() + xlab("Tweet Type") + ylab("Tweet Count") + ggtitle("Tweet Type Breakdown") +   scale_y_continuous(breaks=seq(0,7000,1000)) + scale_x_discrete(labels=four_cats) +
+  geom_text(stat='count', aes(label=..count..), size = 3, vjust=-1) + ggsave("tweet_types.png", width = 5, height = 5)
 ```
+
+
+
+### Sentiment score distributions
+
+```{r}
+
+tweet_data %>% ggplot(aes(x = category, y = sentiment)) + geom_violin(trim = FALSE, draw_quantiles = TRUE,aes(fill = category), alpha = 0.8) + xlab("Tweet Type") + ylab("Sentiment") + scale_fill_discrete(name = "Tweet Type", labels = four_cats) + scale_x_discrete(labels=four_cats) + ggtitle("Tweet Sentiment Distribution") + theme_minimal() + ggsave("violin4.png", width = 5, height = 5)
+
+tweet_data %>% ggplot(aes(x = about_covid, y = sentiment)) + geom_violin(trim = FALSE, aes(fill = about_covid), alpha = 0.8) + xlab("Tweet Type") + ylab("Sentiment") + scale_fill_discrete(name = "Tweet Type", labels = cov_cats) + scale_x_discrete(labels=cov_cats) + ggtitle("COVID-19-Related Tweet Sentiment Distribution") + theme_minimal() + ggsave("violin_cov.png", width = 5, height = 5)
+
+tweet_data %>% ggplot(aes(x = about_china, y = sentiment)) + geom_violin(trim = FALSE, aes(fill = about_china), alpha = 0.8) + xlab("Tweet Type") + ylab("Sentiment") + scale_fill_discrete(name = "Tweet Type", labels = ch_cats) + scale_x_discrete(labels=ch_cats) + ggtitle("China-Related Tweet Sentiment Distribution") + theme_minimal() + ggsave("violin_ch.png", width = 5, height = 5)
+
+```
+
+
+### Tweet sentiments over time (daily)
+
+```{r}
+library(colorspace)
+pal = c("#FCA337","#CBE26A","#34AE93","#267D57")
+tweet_data %>% group_by(date, about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment))  %>% ggplot(aes(x = date, y = day_sentiment)) + geom_line(color = "lightseagreen") + ggtitle("Average Daily Sentiment of Tweets") + xlab("2020") + 
+  ylab("Average Daily Sentiment") + theme_minimal()  + scale_x_date(date_minor_breaks = "7 days") +
+  ggsave("overall_sentiment.png", width = 7.5, height = 5)
+
+tweet_data %>% group_by(date, about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment)) %>% ggplot(aes(x = date, y = day_sentiment)) + geom_line(aes(color = category)) + ggtitle("Average Daily Sentiment of Tweet Categories") + xlab("2020") + 
+  ylab("Average Daily Sentiment") + theme_minimal()  + scale_color_manual(name = "Tweet Type", labels = four_cats, values = pal) + scale_x_date(date_minor_breaks = "7 days") +
+  ggsave("sentiment4.png", width = 7.5, height = 5)
+
+tweet_data %>% group_by(date, about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment)) %>% ggplot(aes(x = date, y = day_sentiment)) + geom_line(aes(color = about_covid)) + ggtitle("Average Daily Sentiment of COVID-19-Related Tweets") + xlab("2020") + 
+  ylab("Average Daily Sentiment") + theme_minimal() +  scale_color_manual(name = "Tweet Type", labels = cov_cats, values = c("#75C4B1", "#F88DA6")) + scale_x_date(date_minor_breaks = "7 days") +
+  ggsave("sentiment_cov.png", width = 7.5, height = 5)
+
+tweet_data %>% group_by(date, about_covid, about_china, category) %>% 
+            summarize(day_sentiment = mean(sentiment)) %>% 
+          ggplot(aes(x = date, y = day_sentiment)) + geom_line(aes(color = about_china)) +  ggtitle("Average Daily Sentiment of China-Related Tweets") + xlab("2020") + 
+  ylab("Average Daily Sentiment") + theme_minimal() +  scale_color_manual(name = "Tweet Type", labels = ch_cats, values = c("#75C4B1", "#F88DA6")) + scale_x_date(date_minor_breaks = "7 days") +
+  ggsave("sentiment_ch.png", width = 7.5, height = 5)
+```
+
+
+### Tweet sentiments over time (per 2 days)
+
+```{r}
+
+
+tweet_data %>% group_by(date_range = cut(date, breaks = 45, include.lowest=TRUE), about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment))  %>% ggplot(aes(x = as.Date(date_range), y = day_sentiment)) + geom_point(color = "lightseagreen") + ggtitle("Average Sentiment of Tweets") + xlab("2020") + 
+  ylab("Average Sentiment (per 2 days)") + theme_minimal()  + scale_x_date(date_minor_breaks = "7 days")  +
+  geom_smooth(color = "lightseagreen", se = FALSE) +
+  ggsave("overall_sentiment_2.png", width = 7.5, height = 5) 
+
+tweet_data %>% group_by(date_range = cut(date, breaks = 45, include.lowest=TRUE), about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment)) %>% ggplot(aes(as.Date(date_range), y = day_sentiment)) + geom_point(aes(color = category)) + ggtitle("Average Sentiment of Tweet Categories") + xlab("2020") + ylab("Average Sentiment (per 2 days)") + theme_minimal()  + scale_color_manual(name = "Tweet Type", labels = four_cats, values = pal) + scale_x_date(date_minor_breaks = "7 days")  +
+  geom_smooth(aes(color = category), se = FALSE) +
+  ggsave("sentiment4_2.png", width = 7.5, height = 5)
+
+tweet_data %>% group_by(date_range = cut(date, breaks = 45, include.lowest=TRUE), about_covid, about_china, category) %>% summarize(day_sentiment = mean(sentiment)) %>% ggplot(aes(as.Date(date_range), y = day_sentiment)) + geom_point(aes(color = about_covid)) + ggtitle("Average Sentiment of COVID-19-Related Tweets") + xlab("2020") +  ylab("Average Sentiment (per 2 days)") + theme_minimal() +  scale_color_manual(name = "Tweet Type", labels = cov_cats, values = c("#75C4B1", "#F88DA6")) + scale_x_date(date_minor_breaks = "7 days")  +
+  geom_smooth(aes(color = about_covid), se = FALSE)
+  
+  ggsave("sentiment_cov_2.png", width = 7.5, height = 5)
+
+tweet_data %>% group_by(date_range = cut(date, breaks = 45, include.lowest=TRUE), about_covid, about_china, category) %>% 
+            summarize(day_sentiment = mean(sentiment)) %>% 
+          ggplot(aes(as.Date(date_range), y = day_sentiment)) + geom_point(aes(color = about_china)) +  ggtitle("Average Sentiment of China-Related Tweets") + xlab("2020") + 
+  ylab("Average Sentiment (per 2 days)") + theme_minimal() +  scale_color_manual(name = "Tweet Type", labels = ch_cats, values = c("#75C4B1", "#F88DA6")) + scale_x_date(date_minor_breaks = "7 days") +
+  geom_smooth(aes(color = about_china), se = FALSE)
+  ggsave("sentiment_ch_2.png", width = 7.5, height = 5)
+```
+
+
+### Keywords
+
+```{r}
+library(packcircles)
+word_list = as.data.frame(table(new_tweet_data$word))
+names(word_list)[1] = 'keyword'
+word_list = word_list %>% arrange(desc(Freq)) %>% filter(keyword != "none")
+pack = circleProgressiveLayout(word_list$Freq, sizetype='area')
+word_data = cbind(word_list, pack)
+word.gg = circleLayoutVertices(pack, npoints=50)
+ggplot() + 
+  
+  # Make the bubbles
+  geom_polygon(data = word.gg, aes(x, y, group = id, fill=as.factor(id)), colour = "black", alpha = 0.6) +
+  
+  # Add text in the center of each bubble + control its size
+  geom_text(data = word_data, aes(x, y, size=Freq*3, label = keyword)) +
+  scale_size_continuous(range = c(1,4)) +
+  
+  # General theme:
+  theme_void() + 
+  theme(legend.position="none") +
+  coord_equal() +
+  ggsave("keyword_cloud.png", width = 9, height = 5)
+
+word_list %>% ggplot(aes(x=reorder(keyword, -Freq), y = Freq), fill=keyword) + geom_bar(stat='identity', fill = "#F2A37E", alpha = 0.8) + geom_text(aes(label=Freq), size = 2.5, vjust=-1) + scale_y_continuous(breaks = seq(0, 4000, 500)) + ggsave("keyword_bargraph.png", width = 8, height = 5) + scale_color_gradient(high = "#F2A37E", low = "#F06D30") + theme_minimal() +  theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("COVID-19/China Keywords") + xlab("Keyword") + ylab("Frequency") + ggsave("keyword_bar.png", width = 8, height = 5)
+
+```
+
+
+
+
 
